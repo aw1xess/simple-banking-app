@@ -45,17 +45,18 @@ const handler = NextAuth({
     strategy: "jwt",
   },
   callbacks: {
-    // Додаємо ID користувача у JWT токен
     async jwt({ token, user }) {
+      // 'user' тепер має тип, який включає 'id'
       if (user) {
         token.id = user.id;
       }
       return token;
     },
-    // Додаємо ID користувача у об'єкт сесії
     async session({ session, token }) {
+      // 'token' тепер має 'id'
+      // 'session.user' тепер теж має 'id'
       if (session.user) {
-        (session.user as any).id = token.id;
+        session.user.id = token.id;
       }
       return session;
     },
