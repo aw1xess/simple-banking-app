@@ -1,0 +1,49 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id    String @id @default(cuid())
+  email String @unique
+  name  String?
+
+  // Зв'язок з автентифікаторами (один користувач може мати багато ключів)
+  authenticators Authenticator[]
+
+  // Метадані для адаптивної автентифікації
+  // Зберігаємо як масив, оскільки користувач може мати кілька довірених пристроїв/місць
+  knownGeoLocations Json[] @default([]) // Зберігаємо об'єкти { city: "...", country: "..." }
+  knownUserAgents   Json[] @default([]) // Зберігаємо об'єкти { userAgent: "...", date: "..." }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Модель для зберігання облікових даних WebAuthn
+model Authenticator {
+  id                   String @id @default(cuid())
+  credentialID         String @unique // Це Base64 URL-safe рядок
+  credentialPublicKey  Bytes // Зберігаємо як бінарні дані
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String? // Зберігаємо як рядок (напр. "internal,hybrid")
+
+  // Зв'язок з користувачем
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
