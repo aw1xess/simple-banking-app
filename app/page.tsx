@@ -1,5 +1,4 @@
-// app/page.tsx
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth/authOptions";
 import { Button } from "@/components/ui/button";
 import { getServerSession } from "next-auth/next";
 import Link from "next/link";

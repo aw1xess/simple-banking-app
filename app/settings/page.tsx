@@ -9,7 +9,7 @@ import {
 import { toast } from "sonner";
 import { UserNav } from "@/components/auth/user-nav";
 import { Button } from "@/components/ui/button";
-import { Loader2, KeyRound, Mail } from "lucide-react";
+import { Loader2, KeyRound } from "lucide-react";
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
