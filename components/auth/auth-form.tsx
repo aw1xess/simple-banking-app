@@ -1,7 +1,6 @@
-// components/auth/auth-form.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import {
@@ -25,19 +24,65 @@ import { Loader2 } from "lucide-react";
 
 export function AuthForm() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
+
+  const [isLoadingPasskey, setIsLoadingPasskey] = useState(false);
+  const [isLoadingRegister, setIsLoadingRegister] = useState(false);
+
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
 
-  /**
-   * Обробник реєстрації
-   */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (window.TypingDNA) {
+        clearInterval(interval);
+        const tdna = new window.TypingDNA();
+
+        tdna.addTarget("email-register");
+        tdna.addTarget("email-login");
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    toast.error("Вставка тексту заборонена", {
+      description:
+        "Будь ласка, введіть дані вручну для реєстрації патерну друку.",
+    });
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+
+    setIsLoadingRegister(true);
 
     try {
-      // ... (логіка fetch)
+      const textToType = email;
+      let typingPattern = null;
+
+      if (window.TypingDNA) {
+        const tdna = new window.TypingDNA();
+        typingPattern = tdna.getTypingPattern({ type: 1, text: textToType });
+      }
+
+      const typingPatternRes = await fetch("/api/auth/save-typing-pattern", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pattern: typingPattern,
+          email: email,
+        }),
+      });
+
+      const typingPatternData = await typingPatternRes.json();
+
+      if (!typingPatternRes.ok) {
+        throw new Error(
+          typingPatternData.error || "Saving typing pattern failed"
+        );
+      }
+
       const optionsRes = await fetch(
         "/api/auth/generate-registration-options",
         {
@@ -56,42 +101,77 @@ export function AuthForm() {
       const verificationRes = await fetch("/api/auth/verify-registration", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Додайте 'challenge' сюди:
         body: JSON.stringify({
           email,
           registrationResponse,
-          challenge: options.challenge, // <--- 💡 ВИПРАВЛЕННЯ
+          challenge: options.challenge,
+          typingPattern: typingPattern,
         }),
       });
+
       const verificationData = await verificationRes.json();
       if (!verificationRes.ok) {
         throw new Error(verificationData.error || "Verification failed");
       }
 
-      // 3. Оновіть виклик toast
       toast.success("Реєстрація успішна!", {
-        description: "Тепер ви можете увійти, використовуючи свій пристрій.",
+        description: "Тепер ви можете увійти у формі з логіном",
       });
     } catch (error: any) {
       console.error(error);
-      // 3. Оновіть виклик toast
       toast.error("Помилка реєстрації", {
         description: error.message || "Невідома помилка",
       });
     } finally {
-      setIsLoading(false);
+      setEmail("");
+      setIsLoadingRegister(false);
     }
   };
 
-  /**
-   * Обробник входу
-   */
-  const handleLogin = async (e: React.FormEvent) => {
+  const runTypingVerification = async (): Promise<boolean> => {
+    try {
+      const textToVerify = email;
+      let typingPattern = null;
+
+      if (window.TypingDNA) {
+        const tdna = new window.TypingDNA();
+        typingPattern = tdna.getTypingPattern({ type: 1, text: textToVerify });
+      }
+
+      const res = await fetch("/api/auth/verify-typing-pattern", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pattern: typingPattern,
+          email: textToVerify,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "API comparison failed");
+      }
+      return true;
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Помилка верифікації патерну", {
+        description: error.message,
+      });
+      return false;
+    }
+  };
+
+  const handlePasskeyLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsLoadingPasskey(true);
 
     try {
-      // ... (логіка fetch)
+      const patternVerified = await runTypingVerification();
+      if (!patternVerified) {
+        setIsLoadingPasskey(false);
+        return;
+      }
+
       const optionsRes = await fetch(
         "/api/auth/generate-authentication-options",
         {
@@ -101,11 +181,7 @@ export function AuthForm() {
         }
       );
       const options = await optionsRes.json();
-      if (!optionsRes.ok) {
-        throw new Error(
-          options.error || "Failed to get authentication options"
-        );
-      }
+      if (!optionsRes.ok) throw new Error(options.error);
 
       const authResponse = await startAuthentication(options);
 
@@ -117,87 +193,83 @@ export function AuthForm() {
       });
 
       if (result?.ok) {
-        // 4. (Опціонально) Можна додати toast успіху і тут
-        toast.success("Вхід успішний!");
+        toast.success("Вхід (Passkey) успішний!");
         router.push("/dashboard");
       } else {
         throw new Error(result?.error || "Не вдалося увійти");
       }
     } catch (error: any) {
       console.error(error);
-      // 3. Оновіть виклик toast
-      toast.error("Помилка входу", {
+      toast.error("Помилка входу (Passkey)", {
         description: error.message || "Невідома помилка",
       });
     } finally {
-      setIsLoading(false);
+      setIsLoadingPasskey(false);
     }
   };
 
-  // ... (решта JSX коду форми залишається без змін)
   return (
     <Tabs defaultValue="login" className="w-[400px]">
       <TabsList className="grid w-full grid-cols-2">
         <TabsTrigger value="login">Вхід</TabsTrigger>
         <TabsTrigger value="register">Реєстрація</TabsTrigger>
       </TabsList>
-
-      {/* ВКЛАДКА ВХОДУ */}
       <TabsContent value="login">
         <Card>
           <CardHeader>
             <CardTitle>Вхід</CardTitle>
             <CardDescription>
-              Використайте ваш пристрій (Face ID, Touch ID, ключ) для входу.
+              Введіть email для перевірки патерну друку та увійдіть з Passkey.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin}>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email-login">Email</Label>
-                  <Input
-                    id="email-login"
-                    type="email"
-                    placeholder="m@example.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  Увійти з Passkey
-                </Button>
-              </div>
+            <div className="space-y-2 mb-4">
+              <Label htmlFor="email-login">Email</Label>
+              <Input
+                id="email-login"
+                type="email"
+                placeholder="m@example.com"
+                autoComplete="off"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            <form onSubmit={handlePasskeyLogin} className="space-y-2">
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isLoadingPasskey || !email}
+              >
+                {isLoadingPasskey && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Увійти з Passkey
+              </Button>
             </form>
           </CardContent>
         </Card>
       </TabsContent>
-
-      {/* ВКЛАДКА РЕЄСТРАЦІЇ */}
       <TabsContent value="register">
         <Card>
           <CardHeader>
             <CardTitle>Реєстрація</CardTitle>
             <CardDescription>
-              Створіть акаунт та зареєструйте свій пристрій.
+              Введіть ваші дані вручну. Вставка заборонена.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleRegister}>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name-register">
-                    Ім&apos;я (необов&apos;язково)
-                  </Label>
+                  <Label htmlFor="name-register">Ім&apos;я</Label>
                   <Input
                     id="name-register"
                     placeholder="Ваше ім'я"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onPaste={handlePaste}
                   />
                 </div>
                 <div className="space-y-2">
@@ -207,12 +279,18 @@ export function AuthForm() {
                     type="email"
                     placeholder="m@example.com"
                     required
+                    autoComplete="off"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    onPaste={handlePaste}
                   />
                 </div>
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading && (
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={isLoadingRegister || !email}
+                >
+                  {isLoadingRegister && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
                   Зареєструвати пристрій

@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import Link from "next/link";
 
 export function UserNav() {
   const { data: session, status } = useSession();
@@ -22,11 +23,10 @@ export function UserNav() {
   }
 
   if (!session) {
-    return null; // Або кнопка "Увійти"
+    return null;
   }
 
   const user = session.user;
-  // Отримуємо ініціали
   const fallback = user?.email
     ? user.email.substring(0, 2).toUpperCase()
     : "UA";
@@ -36,7 +36,6 @@ export function UserNav() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
           <Avatar className="h-8 w-8">
-            {/* <AvatarImage src={user?.image || ""} alt="@username" /> */}
             <AvatarFallback>{fallback}</AvatarFallback>
           </Avatar>
         </Button>
@@ -54,8 +53,12 @@ export function UserNav() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem>Профіль</DropdownMenuItem>
-          <DropdownMenuItem>Налаштування</DropdownMenuItem>
+          <DropdownMenuItem>
+            <Link href="/dashboard">Головна сторінка</Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem>
+            <Link href="/settings">Налаштування</Link>
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/" })}>

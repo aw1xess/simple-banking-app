@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { rpID, rpOrigin } from "@/lib/authUtils";
+import { rpID, rpOrigin } from "@/lib/auth/authUtils";
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import type { VerifiedRegistrationResponse } from "@simplewebauthn/server";
 import { NextResponse } from "next/server";
@@ -8,11 +8,9 @@ import { headers } from "next/headers";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    // 1. Отримайте 'challenge' з тіла запиту
-    const { email, registrationResponse, challenge } = body;
+    const { email, registrationResponse, challenge, typingPattern } = body;
 
     if (!email || !registrationResponse || !challenge) {
-      // <--- 💡 Додайте перевірку
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -24,7 +22,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // 2. Встановіть 'expectedChallenge' з того, що прийшло в 'body'
     const expectedChallenge = challenge;
 
     let verification: VerifiedRegistrationResponse;
@@ -65,12 +62,12 @@ export async function POST(request: Request) {
     await prisma.authenticator.create({
       data: {
         userId: user.id,
-        credentialID: Buffer.from(credentialID).toString("base64url"),
+        id: Buffer.from(credentialID).toString("base64url"),
         credentialPublicKey: Buffer.from(credentialPublicKey),
         counter,
         credentialDeviceType,
         credentialBackedUp,
-        transports: registrationResponse.response.transports?.join(","),
+        // transports: registrationResponse.response.transports?.join(","),
       },
     });
 
@@ -91,10 +88,11 @@ export async function POST(request: Request) {
         knownGeoLocations: {
           push: geo,
         },
+        typingPattern: typingPattern,
       },
     });
 
-    return NextResponse.json({ success: true, verified });
+    return NextResponse.json({ success: true, verified, userId: user.id });
   } catch (error) {
     console.error(error);
     return NextResponse.json(

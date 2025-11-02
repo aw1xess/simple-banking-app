@@ -2,14 +2,46 @@ import NextAuth, { AuthOptions } from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
-import { rpID, rpOrigin } from "@/lib/authUtils";
+import { rpID, rpOrigin } from "@/lib/auth/authUtils";
 import { prisma } from "@/lib/prisma";
 import { authRateLimiter } from "@/lib/rate-limiter";
 import { headers } from "next/headers";
+import EmailProvider from "next-auth/providers/email"; // 1. Імпортуйте EmailProvider
+import { Resend } from "resend"; // 2. Імпортуйте Resend
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma as any),
   providers: [
+    EmailProvider({
+      // Resend не використовує 'server', але ми можемо вказати 'sendVerificationRequest'
+      async sendVerificationRequest({ identifier: email, url }) {
+        if (!process.env.EMAIL_FROM) {
+          console.error("EMAIL_FROM environment variable is not set");
+          return;
+        }
+
+        try {
+          await resend.emails.send({
+            from: process.env.EMAIL_FROM, // 'onboarding@resend.dev' або ваш домен
+            to: email,
+            subject: "Ваше посилання для входу в Simple Bank",
+            html: `
+              <div>
+                <p>Натисніть посилання нижче, щоб увійти до свого акаунту:</p>
+                <a href="${url}" style="background-color: #000; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+                  Увійти
+                </a>
+              </div>
+            `,
+          });
+        } catch (error) {
+          console.error("Failed to send verification email:", error);
+          throw new Error("Failed to send verification email");
+        }
+      },
+    }),
     CredentialsProvider({
       name: "WebAuthn",
       // 'credentials' описує, що ми очікуємо від `signIn()`
@@ -49,7 +81,7 @@ export const authOptions: AuthOptions = {
         // Знаходимо автентифікатор, який намагається використати користувач
         const authResponse = JSON.parse(credentials.authResponse);
         const authenticator = user.authenticators.find(
-          (auth) => auth.credentialID === authResponse.id
+          (auth) => auth.id === authResponse.id
         );
 
         if (!authenticator) {
@@ -65,18 +97,14 @@ export const authOptions: AuthOptions = {
             expectedOrigin: rpOrigin,
             expectedRPID: rpID,
             authenticator: {
-              credentialID: Buffer.from(
-                authenticator.credentialID,
-                "base64url"
-              ),
+              credentialID: Buffer.from(authenticator.id, "base64url"),
               credentialPublicKey: authenticator.credentialPublicKey,
               counter: authenticator.counter,
-              //@ts-expect-error sdsdds
-              transports:
-                (authenticator.transports || undefined) &&
-                (authenticator.transports?.split(
-                  ","
-                ) as AuthenticatorTransport[]),
+              // transports:
+              //   (authenticator.transports || undefined) &&
+              //   (authenticator.transports?.split(
+              //     ","
+              //   ) as AuthenticatorTransport[]),
             },
             requireUserVerification: true,
           });
@@ -173,7 +201,8 @@ export const authOptions: AuthOptions = {
   },
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
-    signIn: "/login", // Вкажіть вашу сторінку входу
+    signIn: "/login",
+    verifyRequest: "/login/verify-request", // Вкажіть вашу сторінку входу
   },
 };
 

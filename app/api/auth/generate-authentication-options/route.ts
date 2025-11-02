@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { rpID } from "@/lib/authUtils";
+import { rpID } from "@/lib/auth/authUtils";
 import { generateAuthenticationOptions } from "@simplewebauthn/server";
 import { NextResponse } from "next/server";
 
@@ -25,13 +25,12 @@ export async function POST(request: Request) {
     const options = await generateAuthenticationOptions({
       rpID,
       // Дозволяємо вхід з будь-якого зареєстрованого пристрою
-      //@ts-expect-error sdsdds
       allowCredentials: userAuthenticators.map((auth) => ({
-        id: auth.credentialID,
+        id: Buffer.from(auth.id, "base64url"),
         type: "public-key",
-        transports:
-          (auth.transports || undefined) &&
-          (auth.transports?.split(",") as AuthenticatorTransport[]),
+        // transports:
+        //   (auth.transports || undefined) &&
+        //   (auth.transports?.split(",") as AuthenticatorTransport[]),
       })),
       userVerification: "preferred",
     });
