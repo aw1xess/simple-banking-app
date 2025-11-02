@@ -1,3 +1,4 @@
+// components/auth/auth-form.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -26,29 +27,39 @@ export function AuthForm() {
   const router = useRouter();
 
   const [isLoadingPasskey, setIsLoadingPasskey] = useState(false);
+  const [isLoadingMagicLink, setIsLoadingMagicLink] = useState(false);
   const [isLoadingRegister, setIsLoadingRegister] = useState(false);
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+
+  const [showStep2, setShowStep2] = useState(false);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (window.TypingDNA) {
-        clearInterval(interval);
-        const tdna = new window.TypingDNA();
-
-        tdna.addTarget("email-register");
-        tdna.addTarget("email-login");
-      }
-    }, 100);
-    return () => clearInterval(interval);
+    if (window.TypingDNA) {
+      const tdna = new window.TypingDNA();
+      tdna.addTarget("name-register");
+      tdna.addTarget("email-register");
+      tdna.addTarget("email-register-confirm");
+      tdna.addTarget("email-login");
+    } else {
+      const interval = setInterval(() => {
+        if (window.TypingDNA) {
+          clearInterval(interval);
+          const tdna = new window.TypingDNA();
+          tdna.addTarget("email-register");
+          tdna.addTarget("email-login");
+        }
+      }, 100);
+      return () => clearInterval(interval);
+    }
   }, []);
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
     toast.error("Вставка тексту заборонена", {
-      description:
-        "Будь ласка, введіть дані вручну для реєстрації патерну друку.",
+      description: "Будь ласка, введіть дані вручну для реєстрації патерну.",
     });
   };
 
@@ -66,21 +77,8 @@ export function AuthForm() {
         typingPattern = tdna.getTypingPattern({ type: 1, text: textToType });
       }
 
-      const typingPatternRes = await fetch("/api/auth/save-typing-pattern", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pattern: typingPattern,
-          email: email,
-        }),
-      });
-
-      const typingPatternData = await typingPatternRes.json();
-
-      if (!typingPatternRes.ok) {
-        throw new Error(
-          typingPatternData.error || "Saving typing pattern failed"
-        );
+      if (!typingPattern) {
+        throw new Error("Не вдалося записати патерн друку. Спробуйте ще раз.");
       }
 
       const optionsRes = await fetch(
@@ -92,9 +90,7 @@ export function AuthForm() {
         }
       );
       const options = await optionsRes.json();
-      if (!optionsRes.ok) {
-        throw new Error(options.error || "Failed to get registration options");
-      }
+      if (!optionsRes.ok) throw new Error(options.error);
 
       const registrationResponse = await startRegistration(options);
 
@@ -110,12 +106,12 @@ export function AuthForm() {
       });
 
       const verificationData = await verificationRes.json();
-      if (!verificationRes.ok) {
+      if (!verificationData.success) {
         throw new Error(verificationData.error || "Verification failed");
       }
 
       toast.success("Реєстрація успішна!", {
-        description: "Тепер ви можете увійти у формі з логіном",
+        description: "Тепер ви можете увійти, використовуючи свій пристрій.",
       });
     } catch (error: any) {
       console.error(error);
@@ -123,41 +119,7 @@ export function AuthForm() {
         description: error.message || "Невідома помилка",
       });
     } finally {
-      setEmail("");
       setIsLoadingRegister(false);
-    }
-  };
-
-  const runTypingVerification = async (): Promise<boolean> => {
-    try {
-      const textToVerify = email;
-      let typingPattern = null;
-
-      if (window.TypingDNA) {
-        const tdna = new window.TypingDNA();
-        typingPattern = tdna.getTypingPattern({ type: 1, text: textToVerify });
-      }
-
-      const res = await fetch("/api/auth/verify-typing-pattern", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pattern: typingPattern,
-          email: textToVerify,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "API comparison failed");
-      }
-      return true;
-    } catch (error: any) {
-      console.error(error);
-      toast.error("Помилка верифікації патерну", {
-        description: error.message,
-      });
-      return false;
     }
   };
 
@@ -166,10 +128,14 @@ export function AuthForm() {
     setIsLoadingPasskey(true);
 
     try {
-      const patternVerified = await runTypingVerification();
-      if (!patternVerified) {
-        setIsLoadingPasskey(false);
-        return;
+      let typingPattern = null;
+      if (window.TypingDNA) {
+        const tdna = new window.TypingDNA();
+        typingPattern = tdna.getTypingPattern({ type: 1, text: loginEmail });
+      }
+
+      if (!typingPattern) {
+        throw new Error("Не вдалося записати патерн друку для верифікації.");
       }
 
       const optionsRes = await fetch(
@@ -177,7 +143,7 @@ export function AuthForm() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email: loginEmail }),
         }
       );
       const options = await optionsRes.json();
@@ -187,14 +153,20 @@ export function AuthForm() {
 
       const result = await signIn("credentials", {
         redirect: false,
-        email: email,
+        email: loginEmail,
         authResponse: JSON.stringify(authResponse),
         challenge: options.challenge,
+        typingPattern: typingPattern,
       });
 
       if (result?.ok) {
         toast.success("Вхід (Passkey) успішний!");
         router.push("/dashboard");
+      } else if (result?.error === "NEEDS_SECOND_FACTOR") {
+        toast.warning("Потрібна додаткова верифікація", {
+          description: "Ми помітили незвичну поведінку під час автентифікації",
+        });
+        setShowStep2(true);
       } else {
         throw new Error(result?.error || "Не вдалося увійти");
       }
@@ -208,49 +180,111 @@ export function AuthForm() {
     }
   };
 
+  const handleMagicLinkLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoadingMagicLink(true);
+    try {
+      const result = await signIn("email", {
+        email: loginEmail,
+        redirect: false,
+        callbackUrl: "/dashboard",
+      });
+      if (result?.error) throw new Error(result.error);
+      router.push("/login/verify-request");
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Помилка (Email)", {
+        description: error.message || "Не вдалося відправити посилання",
+      });
+    } finally {
+      setIsLoadingMagicLink(false);
+    }
+  };
+
   return (
     <Tabs defaultValue="login" className="w-[400px]">
       <TabsList className="grid w-full grid-cols-2">
         <TabsTrigger value="login">Вхід</TabsTrigger>
         <TabsTrigger value="register">Реєстрація</TabsTrigger>
       </TabsList>
+
       <TabsContent value="login">
         <Card>
           <CardHeader>
-            <CardTitle>Вхід</CardTitle>
+            <CardTitle>{!showStep2 ? "Вхід" : "Крок 2: Верифікація"}</CardTitle>
             <CardDescription>
-              Введіть email для перевірки патерну друку та увійдіть з Passkey.
+              {!showStep2
+                ? "Увійдіть за допомогою Passkey."
+                : "Підтвердіть, що це ви, за допомогою посилання."}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 mb-4">
-              <Label htmlFor="email-login">Email</Label>
-              <Input
-                id="email-login"
-                type="email"
-                placeholder="m@example.com"
-                autoComplete="off"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <form onSubmit={handlePasskeyLogin} className="space-y-2">
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isLoadingPasskey || !email}
-              >
-                {isLoadingPasskey && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                Увійти з Passkey
-              </Button>
-            </form>
+            {!showStep2 ? (
+              <>
+                <div className="space-y-2 mb-4">
+                  <Label htmlFor="email-login">Email</Label>
+                  <Input
+                    id="email-login"
+                    type="email"
+                    placeholder="m@example.com"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    disabled={isLoadingPasskey}
+                  />
+                </div>
+                <form onSubmit={handlePasskeyLogin} className="space-y-2">
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoadingPasskey || !loginEmail}
+                  >
+                    {isLoadingPasskey && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Увійти з Passkey
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2 mb-4 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Для завершення входу, будь ласка, підтвердіть, що це ви,
+                    отримавши посилання на:
+                  </p>
+                  <p className="font-semibold">{email}</p>
+                </div>
+                <form
+                  onSubmit={handleMagicLinkLogin}
+                  className="space-y-2 mt-4"
+                >
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    className="w-full"
+                    disabled={isLoadingMagicLink}
+                  >
+                    {isLoadingMagicLink && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Надіслати посилання
+                  </Button>
+                  <Button
+                    variant="link"
+                    type="button"
+                    className="w-full"
+                    onClick={() => setShowStep2(false)}
+                  >
+                    Скасувати
+                  </Button>
+                </form>
+              </>
+            )}
           </CardContent>
         </Card>
       </TabsContent>
+
       <TabsContent value="register">
         <Card>
           <CardHeader>

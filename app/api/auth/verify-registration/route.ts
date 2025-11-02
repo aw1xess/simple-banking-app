@@ -1,3 +1,4 @@
+// app/api/auth/verify-registration/route.ts
 import { prisma } from "@/lib/prisma";
 import { rpID, rpOrigin } from "@/lib/auth/authUtils";
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
@@ -7,7 +8,10 @@ import { headers } from "next/headers";
 
 export async function POST(request: Request) {
   try {
+    const headersList = await headers();
     const body = await request.json();
+
+    // 💡 ОНОВЛЕНО: Отримуємо 'typingPattern'
     const { email, registrationResponse, challenge, typingPattern } = body;
 
     if (!email || !registrationResponse || !challenge) {
@@ -58,7 +62,6 @@ export async function POST(request: Request) {
       credentialBackedUp,
     } = registrationInfo;
 
-    // Зберігаємо новий автентифікатор в БД
     await prisma.authenticator.create({
       data: {
         userId: user.id,
@@ -67,12 +70,42 @@ export async function POST(request: Request) {
         counter,
         credentialDeviceType,
         credentialBackedUp,
-        // transports: registrationResponse.response.transports?.join(","),
       },
     });
 
-    // Оновлюємо метадані користувача для адаптивної логіки
-    const headersList = await headers();
+    if (typingPattern) {
+      try {
+        const response = await fetch(
+          `https://api.typingdna.com/save/${email}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "no-cache",
+              Authorization:
+                "Basic " +
+                Buffer.from(
+                  process.env.TYPINGDNA_API_KEY +
+                    ":" +
+                    process.env.TYPINGDNA_API_SECRET
+                ).toString("base64"),
+            },
+            body: JSON.stringify({
+              tp: typingPattern,
+            }),
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error("TypingDNA save failed:", errorData.message);
+        } else {
+          console.log("TypingDNA pattern saved successfully.");
+        }
+      } catch (e) {
+        console.error("Server-side fetch to TypingDNA failed:", e);
+      }
+    }
+
     const userAgent = headersList.get("user-agent") || "unknown";
     const geo = {
       city: headersList.get("x-vercel-ip-city") || "unknown",
@@ -88,15 +121,14 @@ export async function POST(request: Request) {
         knownGeoLocations: {
           push: geo,
         },
-        typingPattern: typingPattern,
       },
     });
 
-    return NextResponse.json({ success: true, verified, userId: user.id });
-  } catch (error) {
+    return NextResponse.json({ success: true, verified });
+  } catch (error: any) {
     console.error(error);
     return NextResponse.json(
-      { error: "Failed to verify registration" },
+      { error: error.message || "Failed to verify registration" },
       { status: 500 }
     );
   }

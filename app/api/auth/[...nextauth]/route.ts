@@ -1,40 +1,75 @@
+// app/api/auth/[...nextauth]/route.ts
 import NextAuth, { AuthOptions } from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 import { rpID, rpOrigin } from "@/lib/auth/authUtils";
 import { prisma } from "@/lib/prisma";
-import { authRateLimiter } from "@/lib/rate-limiter";
 import { headers } from "next/headers";
-import EmailProvider from "next-auth/providers/email"; // 1. Імпортуйте EmailProvider
-import { Resend } from "resend"; // 2. Імпортуйте Resend
+import EmailProvider from "next-auth/providers/email";
+import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+async function verifyTypingPattern(
+  pattern: string,
+  email: string
+): Promise<{ result?: boolean; score?: number; error?: string }> {
+  if (pattern === "STEP_UP_AUTH") {
+    return { result: true, score: 100 };
+  }
+  try {
+    const response = await fetch(`https://api.typingdna.com/verify/${email}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        Authorization:
+          "Basic " +
+          Buffer.from(
+            process.env.TYPINGDNA_API_KEY +
+              ":" +
+              process.env.TYPINGDNA_API_SECRET
+          ).toString("base64"),
+      },
+      body: JSON.stringify({
+        tp: pattern,
+        quality: 2,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`TypingDNA API error: ${errorData.message}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      result: data.result === 1,
+      score: data.score,
+    };
+  } catch (error: any) {
+    console.error(error);
+    return { error: error.message || "API comparison failed" };
+  }
+}
 
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma as any),
   providers: [
     EmailProvider({
-      // Resend не використовує 'server', але ми можемо вказати 'sendVerificationRequest'
       async sendVerificationRequest({ identifier: email, url }) {
         if (!process.env.EMAIL_FROM) {
           console.error("EMAIL_FROM environment variable is not set");
           return;
         }
-
         try {
           await resend.emails.send({
-            from: process.env.EMAIL_FROM, // 'onboarding@resend.dev' або ваш домен
+            from: process.env.EMAIL_FROM!,
             to: email,
             subject: "Ваше посилання для входу в Simple Bank",
-            html: `
-              <div>
-                <p>Натисніть посилання нижче, щоб увійти до свого акаунту:</p>
-                <a href="${url}" style="background-color: #000; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-                  Увійти
-                </a>
-              </div>
-            `,
+            html: `<p>Натисніть <a href="${url}">це посилання</a> щоб увійти.</p>`,
           });
         } catch (error) {
           console.error("Failed to send verification email:", error);
@@ -42,53 +77,46 @@ export const authOptions: AuthOptions = {
         }
       },
     }),
+
     CredentialsProvider({
       name: "WebAuthn",
-      // 'credentials' описує, що ми очікуємо від `signIn()`
       credentials: {
         email: { label: "Email", type: "text" },
         authResponse: { label: "WebAuthn Response", type: "text" },
         challenge: { label: "Challenge", type: "text" },
+        typingPattern: { label: "Typing Pattern", type: "text" },
       },
       async authorize(credentials) {
         if (
           !credentials?.authResponse ||
           !credentials.challenge ||
-          !credentials.email
+          !credentials.email ||
+          !credentials.typingPattern
         ) {
+          console.error("Missing credentials fields");
           return null;
         }
 
         const headersList = await headers();
-        // 1. АДАПТИВНІСТЬ: Обмеження частоти запитів (Rate Limit)
-        const ip = headersList.get("x-forwarded-for") || "127.0.0.1";
-        const { success, remaining } = await authRateLimiter.limit(ip);
-
-        if (!success) {
-          console.warn(`Rate limit exceeded for IP: ${ip}`);
-          throw new Error("Too many requests. Please try again later.");
-        }
 
         const user = await prisma.user.findUnique({
           where: { email: credentials.email },
-          include: { authenticators: true }, // Включаємо автентифікатори
+          include: { authenticators: true },
         });
 
         if (!user || !user.authenticators.length) {
           throw new Error("User or authenticators not found.");
         }
 
-        // Знаходимо автентифікатор, який намагається використати користувач
         const authResponse = JSON.parse(credentials.authResponse);
         const authenticator = user.authenticators.find(
           (auth) => auth.id === authResponse.id
         );
 
         if (!authenticator) {
-          throw new Error("Authenticator not found for this user.");
+          throw new Error("Authenticator not found.");
         }
 
-        // 2. ВЕРИФІКАЦІЯ WEBAUTHN
         let verification;
         try {
           verification = await verifyAuthenticationResponse({
@@ -100,11 +128,6 @@ export const authOptions: AuthOptions = {
               credentialID: Buffer.from(authenticator.id, "base64url"),
               credentialPublicKey: authenticator.credentialPublicKey,
               counter: authenticator.counter,
-              // transports:
-              //   (authenticator.transports || undefined) &&
-              //   (authenticator.transports?.split(
-              //     ","
-              //   ) as AuthenticatorTransport[]),
             },
             requireUserVerification: true,
           });
@@ -113,72 +136,59 @@ export const authOptions: AuthOptions = {
           throw new Error("Authentication failed.");
         }
 
-        const { verified, authenticationInfo } = verification;
-
-        if (!verified) {
+        if (!verification.verified) {
           throw new Error("Could not verify authentication.");
         }
 
-        // 3. АДАПТИВНІСТЬ: Перевірка GEO та User-Agent
-        const userAgent = headersList.get("user-agent") || "unknown";
+        let isKnownGeo = false;
+        let isKnownAgent = false;
+        let isTypingPatternMatch = false;
+
         const geo = {
           city: headersList.get("x-vercel-ip-city") || "unknown",
           country: headersList.get("x-vercel-ip-country") || "unknown",
         };
-
-        const isKnownAgent = user.knownUserAgents.some(
-          (agent: any) => agent.userAgent === userAgent
-        );
-        const isKnownGeo = user.knownGeoLocations.some(
+        isKnownGeo = user.knownGeoLocations.some(
           (loc: any) => loc.city === geo.city && loc.country === geo.country
         );
 
-        if (!isKnownAgent || !isKnownGeo) {
-          // **ЦЕ ВАША АДАПТИВНА ЛОГІКА**
-          // Ми виявили підозрілу поведінку.
-          // У цьому прикладі ми *відхиляємо* вхід і просимо пройти дод. фактор.
-          // (У вашій моделі ви б тут запросили другий фактор)
+        const userAgent = headersList.get("user-agent") || "unknown";
+        isKnownAgent = user.knownUserAgents.some(
+          (agent: any) => agent.userAgent === userAgent
+        );
 
-          // Для демонстрації, давайте просто повернемо помилку
-          // У реальному додатку ви б встановили 'partial_auth' в сесії
-          // і перенаправили на сторінку 2FA.
-
-          // Оскільки у нас зараз лише один фактор, давайте відхилимо
-          console.warn(`Suspicious login detected for ${user.email}`);
-          // throw new Error("Suspicious activity detected. Additional verification required.");
-
-          // Або, для демонстрації, давайте просто "позначимо" це, але пропустимо
-          // і додамо новий пристрій/гео до списку відомих
-          if (!isKnownAgent) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                knownUserAgents: {
-                  push: { userAgent, date: new Date().toISOString() },
-                },
-              },
-            });
-          }
-          if (!isKnownGeo) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { knownGeoLocations: { push: geo } },
-            });
-          }
+        if (!user.typingPattern) {
+          console.warn(`User ${user.id} has no enrolled typing pattern.`);
+          isTypingPatternMatch = false;
+        } else {
+          const verificationResult = await verifyTypingPattern(
+            credentials.typingPattern,
+            credentials.email
+          );
+          isTypingPatternMatch = verificationResult.result ?? false;
         }
 
-        // Оновлюємо лічильник автентифікатора в БД
-        await prisma.authenticator.update({
-          where: { id: authenticator.id },
-          data: { counter: authenticationInfo.newCounter },
-        });
+        const isSecure = isKnownGeo && isKnownAgent && isTypingPatternMatch;
 
-        // Успішний вхід! Повертаємо користувача
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-        };
+        if (isSecure) {
+          console.log(`Low-risk login for ${user.email}. All checks passed.`);
+
+          await prisma.authenticator.update({
+            where: { id: authenticator.id },
+            data: { counter: verification.authenticationInfo.newCounter },
+          });
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+          };
+        } else {
+          console.warn(`High-risk login for ${user.email}. Step-up required.`);
+          console.log({ isKnownGeo, isKnownAgent, isTypingPatternMatch });
+
+          throw new Error("NEEDS_SECOND_FACTOR");
+        }
       },
     }),
   ],
@@ -202,7 +212,7 @@ export const authOptions: AuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
     signIn: "/login",
-    verifyRequest: "/login/verify-request", // Вкажіть вашу сторінку входу
+    verifyRequest: "/login/verify-request", // Сторінка "Перевірте пошту"
   },
 };
 

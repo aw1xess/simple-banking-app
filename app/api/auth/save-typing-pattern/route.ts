@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   try {
-    // 1. Отримуємо *новий* патерн ТА *email* (який може бути)
     const { pattern, email } = await request.json();
     if (!pattern) {
       return NextResponse.json(

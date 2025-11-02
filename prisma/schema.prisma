@@ -1,5 +1,7 @@
+// prisma/schema.prisma
+
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../lib/generated/prisma"
 }
 
@@ -12,25 +14,28 @@ model User {
   id    String @id @default(cuid())
   email String @unique
   name  String?
+
+  emailVerified DateTime?
+  image         String?
   accounts      Account[]
   sessions      Session[]
 
   authenticators Authenticator[]
 
-  knownGeoLocations Json[] @default([])
-  knownUserAgents   Json[] @default([])
-  typingPattern String?
+  knownGeoLocations Json[]    @default([])
+  knownUserAgents   Json[]    @default([])
+  otpCodeHash       String? 
+  otpExpiry         DateTime?
 }
 
 model Authenticator {
-  id String @unique
+  id                   String  @id 
   credentialPublicKey  Bytes
-  counter Int
+  counter              Int
   credentialDeviceType String
-  credentialBackedUp Boolean
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialBackedUp   Boolean
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId               String
 
   @@index([userId])
 }
@@ -48,8 +53,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
