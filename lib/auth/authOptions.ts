@@ -54,7 +54,6 @@ async function verifyTypingPattern(
   }
 }
 
-// 💡 ТУТ ТЕПЕР ЖИВЕ ВАШ ОБ'ЄКТ. 'export' тут - це правильно.
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma as any),
   providers: [
@@ -171,8 +170,6 @@ export const authOptions: AuthOptions = {
         const isSecure = isKnownGeo && isKnownAgent && isTypingPatternMatch;
 
         if (isSecure) {
-          console.log(`Low-risk login for ${user.email}. All checks passed.`);
-
           await prisma.authenticator.update({
             where: { id: authenticator.id },
             data: { counter: verification.authenticationInfo.newCounter },
@@ -185,8 +182,6 @@ export const authOptions: AuthOptions = {
           };
         } else {
           console.warn(`High-risk login for ${user.email}. Step-up required.`);
-          console.log({ isKnownGeo, isKnownAgent, isTypingPatternMatch });
-
           throw new Error("NEEDS_SECOND_FACTOR");
         }
       },

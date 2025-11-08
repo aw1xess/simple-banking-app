@@ -34,7 +34,6 @@ export async function POST() {
       (loc: any) => loc.city === geo.city && loc.country === geo.country
     );
 
-    // Оновлюємо, лише якщо щось нове
     if (!isKnownAgent || !isKnownGeo) {
       await prisma.user.update({
         where: { id: session.user.id },
@@ -45,7 +44,6 @@ export async function POST() {
           knownGeoLocations: isKnownGeo ? undefined : { push: geo },
         },
       });
-      console.log(`Saved new device/geo for user ${session.user.id}`);
     }
 
     return NextResponse.json({

@@ -1,5 +1,4 @@
-// app/providers.tsx
-"use client"; // Це обов'язково для SessionProvider
+"use client";
 
 import { SessionProvider } from "next-auth/react";
 import React from "react";

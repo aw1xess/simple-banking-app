@@ -46,46 +46,56 @@ export default function DashboardPage() {
 
   const user = session.user;
 
+  const resetForm = () => {
+    setCardNumber("");
+    setPaymentAmount("");
+  };
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast("Потрібна додаткова верифікація", {
-      description: "Підтвердіть вашу особу, щоб продовжити.",
-    });
-    try {
-      if (!user?.email) throw new Error("Session not found");
-      const optionsRes = await fetch(
-        "/api/auth/generate-authentication-options",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email }),
-        }
-      );
-      const options = await optionsRes.json();
-      if (!optionsRes.ok) throw new Error(options.error);
-
-      const authResponse = await startAuthentication(options);
-
-      const result = await signIn("credentials", {
-        redirect: false,
-        email: user.email,
-        authResponse: JSON.stringify(authResponse),
-        challenge: options.challenge,
-        typingPattern: "STEP_UP_AUTH",
+    if (Number(paymentAmount) < 100) {
+      toast.success("Переказ коштів успішний!");
+      resetForm();
+    } else {
+      toast("Потрібна додаткова верифікація", {
+        description: "Підтвердіть вашу особу, щоб продовжити.",
       });
+      try {
+        if (!user?.email) throw new Error("Session not found");
+        const optionsRes = await fetch(
+          "/api/auth/generate-authentication-options",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: user.email }),
+          }
+        );
+        const options = await optionsRes.json();
+        if (!optionsRes.ok) throw new Error(options.error);
 
-      if (result?.ok) {
-        toast.success("Особу підтверджено!", {
-          description: "Переказ коштів успішний!",
+        const authResponse = await startAuthentication(options);
+
+        const result = await signIn("credentials", {
+          redirect: false,
+          email: user.email,
+          authResponse: JSON.stringify(authResponse),
+          challenge: options.challenge,
+          typingPattern: "STEP_UP_AUTH",
         });
-      } else {
-        throw new Error(result?.error || "Verification failed");
+
+        if (result?.ok) {
+          toast.success("Особу підтверджено!", {
+            description: "Переказ коштів успішний!",
+          });
+          resetForm();
+        } else {
+          throw new Error(result?.error || "Verification failed");
+        }
+      } catch (error: any) {
+        console.error(error);
+        toast.error("Помилка верифікації", {
+          description: error.message || "Невідома помилка",
+        });
       }
-    } catch (error: any) {
-      console.error(error);
-      toast.error("Помилка верифікації", {
-        description: error.message || "Невідома помилка",
-      });
     }
   };
 
@@ -156,7 +166,7 @@ export default function DashboardPage() {
             <CardFooter>
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full mt-5"
                 disabled={cardNumber.length < 19 || !paymentAmount}
               >
                 Надіслати

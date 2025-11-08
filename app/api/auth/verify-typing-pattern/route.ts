@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   try {
-    // 1. Отримуємо *новий* патерн ТА *email* (який може бути)
     const { pattern, email } = await request.json();
     if (!pattern) {
       return NextResponse.json(
@@ -37,7 +36,6 @@ export async function POST(request: Request) {
 
     const data = await response.json();
 
-    // 5. Повертаємо результат клієнту (без змін)
     return NextResponse.json({
       result: data.result === 1,
       score: data.score,

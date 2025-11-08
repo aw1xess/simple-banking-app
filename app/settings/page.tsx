@@ -11,7 +11,7 @@ import { UserNav } from "@/components/auth/user-nav";
 import { Button } from "@/components/ui/button";
 import { Loader2, KeyRound } from "lucide-react";
 
-export default function DashboardPage() {
+export default function SettingsPage() {
   const { data: session, status } = useSession();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -51,6 +51,7 @@ export default function DashboardPage() {
         email: user.email,
         authResponse: JSON.stringify(authResponse),
         challenge: options.challenge,
+        typingPattern: "STEP_UP_AUTH",
       });
 
       if (result?.ok) {
@@ -153,21 +154,6 @@ export default function DashboardPage() {
               Додати новий
             </Button>
           </div>
-
-          {/* <div className="flex items-center justify-between rounded-lg border p-4">
-            <div className="flex items-center space-x-4">
-              <Mail className="h-8 w-8 text-primary" />
-              <div>
-                <h3 className="text-lg font-medium">Magic Link (Email)</h3>
-                <p className="text-sm text-muted-foreground">
-                  Метод відновлення через посилання на вашу пошту
-                </p>
-              </div>
-            </div>
-            <Button variant="outline" disabled>
-              Додано
-            </Button>
-          </div> */}
         </div>
       </main>
     </div>

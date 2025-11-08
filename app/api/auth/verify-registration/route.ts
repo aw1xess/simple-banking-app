@@ -11,7 +11,6 @@ export async function POST(request: Request) {
     const headersList = await headers();
     const body = await request.json();
 
-    // 💡 ОНОВЛЕНО: Отримуємо 'typingPattern'
     const { email, registrationResponse, challenge, typingPattern } = body;
 
     if (!email || !registrationResponse || !challenge) {
@@ -98,8 +97,6 @@ export async function POST(request: Request) {
         if (!response.ok) {
           const errorData = await response.json();
           console.error("TypingDNA save failed:", errorData.message);
-        } else {
-          console.log("TypingDNA pattern saved successfully.");
         }
       } catch (e) {
         console.error("Server-side fetch to TypingDNA failed:", e);
